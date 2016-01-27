@@ -1,0 +1,284 @@
+---
+title: "Petrol"
+output: pdf_document
+---
+
+### Importing libraries 
+```{r}
+library(dplyr)
+library(ggplot2)
+library(car)
+library(gridExtra)
+library(caTools)
+library(xlsx)
+library(corrplot)
+```
+
+### Loading data
+```{r import-excel}
+library(xlsx)
+getwd()
+setwd('/Users/nareshshah/Downloads')
+workbook <- "DataPetrolCase1.xlsx"
+historical <- read.xlsx(workbook,3)
+trimestres <- read.xlsx(workbook,4)
+transformed <- read.xlsx(workbook,5)
+```
+
+
+### STEP 1: Take a look at the simple scatter plots to see if the relations are linear or if you need to transform the data
+```{r}
+str(transformed)
+summary(transformed)
+
+q1<-qplot(data=transformed, X..X1_Price_of_Petrol, y_Petrol.consumption, color=factor(YEARS))
+
+q2<-qplot(data=transformed, YEARS, y_Petrol.consumption, cex=factor(X..X1_Price_of_Petrol))
+
+q3<-qplot(data=transformed, X2_Bus_Fares, y_Petrol.consumption)
+
+q4<-qplot(data=transformed, X..X3_.DPC.habit., y_Petrol.consumption)
+
+q5<-qplot(data=transformed, X4_Number_Tourists, y_Petrol.consumption)
+
+q6<-qplot(data=transformed, X5_Number_Petrol_veh, y_Petrol.consumption)
+
+grid.arrange(q1, q2, q3, q4, q5, q6, nrow=2)
+```
+
+### STEP 2/3:  Compute all the correlations between all the variables and analyze possible multicollinearity
+```{r correlation between all the variables}
+M <-cor(transformed)#Correlation Matrix
+#Graficamente:
+corrplot(M,method ="number")
+corrplot(M,method ="square")
+```
+
+### STEP 4: Estimate the regression model. 
+```{r}
+#To build the model we are going to see which variables are more relevant by checking the p-value in the summary of the model. Then we will combine them and see if there is multicolinearity or not.
+
+
+fit  <- lm(y_Petrol.consumption ~ (X..X1_Price_of_Petrol), data=transformed)
+summary(fit)
+anova(fit) #F value=38.333>Pr(>F), reject H0, the coefficient is not 0.
+#Multiple R-squared:  0.6805,	Adjusted R-squared:  0.6627 
+
+fit  <- lm(y_Petrol.consumption ~ (X2_Bus_Fares), data=transformed)
+summary(fit)
+anova(fit) #F value=49.086>Pr(>F), reject H0, the coefficient is not 0.
+#Multiple R-squared:  0.7317,	Adjusted R-squared:  0.7168 
+
+fit  <- lm(y_Petrol.consumption ~ (X..X3_.DPC.habit.), data=transformed)
+summary(fit)
+anova(fit) #F value=499.32>>Pr(>F), reject H0, the coefficient is not 0.
+#Multiple R-squared:  0.9652,	Adjusted R-squared:  0.9633 
+
+fit  <- lm(y_Petrol.consumption ~ (X4_Number_Tourists), data=transformed)
+summary(fit)
+anova(fit) #F value=1.5522 slightly higher than Pr(>F).
+#Multiple R-squared:  0.07939,	Adjusted R-squared:  0.02824 
+
+
+fit  <- lm(y_Petrol.consumption ~ (X5_Number_Petrol_veh), data=transformed)
+summary(fit)
+anova(fit) #F value=262.76>>Pr(>F), reject H0, the coefficient is not 0.
+#Multiple R-squared:  0.9359,	Adjusted R-squared:  0.9323 
+
+
+#Combinamos las dos variables que más explican: X3 y X5
+fit  <- lm(y_Petrol.consumption ~ (X..X3_.DPC.habit.+X5_Number_Petrol_veh), data=transformed)
+anova(fit) 
+#F value=5153.20>>Pr(>F), reject H0, the coefficient of X3 is not 0.
+#F value=168.77>>Pr(>F), reject H0, the coefficient of X5 is not 0.
+summary(fit)
+#Multiple R-squared:  0.9968,	Adjusted R-squared:  0.9964 
+#X1 and X5 are highly correlated cov(x3,x5)=0.9094443. This means that there is multicolinearity, so we are going to try to find a better model.
+
+fit  <- lm(y_Petrol.consumption ~ (X..X3_.DPC.habit.+X5_Number_Petrol_veh+X2_Bus_Fares), data=transformed)
+summary(fit)
+anova(fit) 
+#Multiple R-squared:  0.997,	Adjusted R-squared:  0.9964 
+#There is no big difference between this model and the previous one. We can see in the summary(fit) that the p-value for X2 is bigger than 0.05, so this variable is not significant. 
+
+#In order to avoid multicolinearity we are going to omit X3 and combine X5 with X1
+fit  <- lm(y_Petrol.consumption ~ (X..X1_Price_of_Petrol+X5_Number_Petrol_veh), data=transformed)
+summary(fit)
+anova(fit) #Multiple R-squared:  0.9812,	Adjusted R-squared:  0.979 
+vif(fit) #X..X1_Price_of_Petrol=1.930757;  X5_Number_Petrol_veh=1.930757  
+                        
+#This is a better model and we can check that there is no multicolinearity by using the function "vif" (the coefficients are lower than 4). Let's introduce now log (X2) (the relationship between X2 and Y is exponential and we can make it linear by taking the log) to see the effect on that model:
+
+fit  <- lm(y_Petrol.consumption ~ (X..X1_Price_of_Petrol+X5_Number_Petrol_veh+log(X2_Bus_Fares)), data=transformed)
+summary(fit)#The three variables are significant 
+anova(fit)#Multiple R-squared:  0.9942,	Adjusted R-squared:  0.9931 
+vif(fit)#The only problem with this model is that there is multi-colinearity.
+
+#Our final model is y~a0 + a1x1 + a2x5:
+
+fit  <- lm(y_Petrol.consumption ~ (X..X1_Price_of_Petrol+X5_Number_Petrol_veh), data=transformed)
+
+# We should also note that this model will be the easiest one to explain as it is fairly easy to understand. 
+
+```
+
+
+
+## Regression diagnostics
+We will now test if the four fundamental assumptions of regression are present in our model.
+
+### A1: Checking Linear Relation
+```{r}
+qplot(predict(fit), rstandard(fit), geom="point", colour=I("blueviolet")) +
+  geom_hline(yintercept=0, colour=I("blue"), alpha=I(0.5))#The plot shows the residuals of the model against the predicted values. As we can see, the dots are scattered randomly so there is no pattern followed, so the linear relation assumption between the dependent and independent variables is proved.
+```
+
+
+### A2: Checking Normality
+```{r}
+# histogram
+q1 = qplot(rstandard(fit), geom="blank") +
+  geom_histogram(aes(y=..density..), fill=I("thistle1"), colour=I("black"), binwidth=0.5)+
+  stat_function(fun=dnorm, args=list(mean=0, sd=1),
+                colour=I("deeppink4"), alpha=I(0.8))
+# qqplot
+q2 = qplot(sample=rstandard(fit)) +
+  geom_abline(slope=1,intercept=0, colour=I("violetred"))
+
+grid.arrange(q1, q2, nrow=1)#The residuals are very close to be distrubuted following a normal distribution
+```
+
+### A3: Checking Homoscedasticity (equal variance)
+```{r}
+qplot(predict(fit), rstandard(fit), geom="point", colour=I("deepskyblue3")) + geom_hline(yintercept=0, colour=I("dodgerblue4")) +
+  geom_hline(yintercept=1.8, colour = I("red"), alpha=I(0.5)) +
+  geom_hline(yintercept=-1.8, colour = I("red"), alpha=I(0.5)) #se cumple. variances remain similar.
+```
+
+
+### A4: Checking Independence
+* H0 : errors are not autocorrelated
+* H1 : errors are autocorrelated (dependent)
+
+```{r}
+durbinWatsonTest(fit)
+#We are using Durbin-Watson test to check independence. If p-value is >= 0.05 then we cannot reject that they are independent(they are independent and we can continue with this test)
+#In this case, p-value is 0, which means that we can reject that the variables are independent. 
+```
+
+### STEP 5: Test the parameters and analyze the multiple correlation and the coefficient of determination for the final model
+
+```{r}
+# We again consider the R-squared value and the p-vaules in our final model. 
+summary(fit)
+
+# We can see that the p-values for both coefficents are below 0.05 and our R-squared value is 99.64 percent. Thus, we can say that x1 and x2 are not correlated in way that is affecting our model. Let's make a plot to see this visually. 
+
+qplot(data = transformed, transformed$X..X1_Price_of_Petrol, transformed$X5_Number_Petrol_veh, xlab = "Price of Petrol", ylab = "Number of Vehicals", main = "Price of Petrol vs Number of Vehicals")
+
+# As we expected, there is no apparent linear relationship between x1 and x2. 
+
+# We could also use the VIF function again. As a rule of thumb, a VIF value above 10 indicates multi-colinearity. As we can see, the values for price of petrol and number of vehicals is ~ 1.93. 
+
+vif(fit)
+
+```
+
+
+### STEP 6: Forecast
+
+```{r}
+# Finally, we turn to forecasting using linear regression. We have to assume here that the change to the varibles in our model for year twenty-one are small changes and within the scope of our regression to succesfully model. 
+
+# First, we create new dataframe with data to go into row twenty-one We use assumptions in the case to build the dataframe.
+transformed1 = data.frame(
+  YEARS = 21,
+  y_Petrol.consumption = NA,
+  X..X1_Price_of_Petrol = transformed[20, 3]*1.035, 
+  X2_Bus_Fares = transformed[20, 4]*1.015, 
+  X..X3_.DPC.habit. = transformed[20, 5]*1.018, 
+  X4_Number_Tourists = transformed[20, 6]*0.99, 
+  X5_Number_Petrol_veh = transformed[20, 7]*1.02
+  )
+
+# create a new dataframe with row 21 for use in our model. 
+transformed1_new = data.frame(transformed1$X..X1_Price_of_Petrol, transformed1$X5_Number_Petrol_veh)
+
+# Predict values with fit 
+names(transformed1_new) = c("X..X1_Price_of_Petrol","X5_Number_Petrol_veh")
+predict_fit = predict(fit, newdata = transformed1_new)
+summary(predict_fit)
+summary(fit)
+
+# Our predicted value for petrol consumption in year 21 in 8881 (in thousands of tons) 
+
+# NOTE: I am really questioning how we got this value. It makes no sense that in part two we are getting a value between 9256 and 9300 and here we are getting 8881. I have looked at this several times but haven't gotten anywhere. Any ideas? 
+
+##########################################################################################
+#Part 2
+
+# Part two asks us to refine our prediction assuming that price is given by a normal distribution with mean = 70 and standard deviation = 6.67. 
+
+# First step is to run simulation to get 100 varibles using a normal distribution with mean = 70 and sd = 6.67.
+price_data = rnorm(100,70,6.67)
+price_data = price_data/7.03
+
+# create new dataframe and run a prediction on it
+dataframe_part2 = data.frame(price_data[1:100], transformed1$X5_Number_Petrol_veh)
+names(dataframe_part2) = c("X..X1_Price_of_Petrol","X5_Number_Petrol_veh")
+predict_part2 = predict(fit, newdata =  dataframe_part2)
+summary(predict_part2)
+
+
+# calculate confidence intervals for part 2
+lower = mean(predict_part2)-2*sd(predict_part2)/sqrt(length(predict_part2))
+upper = mean(predict_part2)+2*sd(predict_part2)/sqrt(length(predict_part2))
+
+# The confidence intervals indicate that we can say that 95% of the time the value of the the consumption will lie between 9256 (thousands of tons) and 9306 (thousands of tons) 
+
+```
+#Step 7: Time series based predictions
+```{r}
+#Lets plot the dataset first
+ts.plot(transformed$y_Petrol.consumption)
+#Lets look at the autocorrelation of the time series
+acf(transformed$y_Petrol.consumption)
+#There seems to be not very much periodicity in the data.
+#Lets plot the log of the dataset 
+ts.plot(log(transformed$y_Petrol.consumption))
+#There seems to no periodic change in the log graph
+acf(log(transformed$y_Petrol.consumption))
+#Lets fit this to an ARIMA Model
+petrol.ar = ar.yw(log(transformed$y_Petrol.consumption))
+#Lets look at the order of the ARIMA model
+petrol.ar$order.max
+#Lets look at the ARIMA Model arrived at
+petrol.ar$aic
+#Lets plot the ARIMA model vs the original time series
+ts.plot(log(transformed$y_Petrol.consumption)-petrol.ar$resid)
+lines(log(transformed$y_Petrol.consumption),col=2)
+# As we can see, this is a pretty good fit. The black line is the model predicted by ARIMA
+#Lets forecast now
+petrol_predict = predict(petrol.ar,n.ahead = 1)
+#Since we looked at the logarithmic values we must use a reverse transform
+exp(petrol_predict$pred)
+```
+#Step 8: Forecasting quarterly
+```{r}
+petrol_q = ts(trimestres)
+#Look at the data
+str(trimestres)
+petrol_q.ar = ar.yw(log(trimestres$CONSUMPTION))
+#Look at the ARIMA model
+petrol_q.ar$aic
+#Plot the ARIMA Model
+ts.plot(log(trimestres$CONSUMPTION)-petrol_q.ar$resid)
+lines(log(trimestres$CONSUMPTION),col=2)
+#Forecast the next year's consumption
+petrol_q_predict = predict(petrol_q.ar,n.ahead=4)
+#Taking the exponent and adding the four quarterly predicted values
+sum(exp(petrol_q_predict$pred))
+
+```
+
+
